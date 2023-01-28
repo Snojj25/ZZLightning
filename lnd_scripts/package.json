@@ -10,7 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@grpc/grpc-js": "^1.7.3",
     "@node-lightning/invoice": "^0.28.0",
+    "axios": "^1.2.6",
     "ethers": "^5.7.2",
     "node-fetch": "^3.3.0"
   }
