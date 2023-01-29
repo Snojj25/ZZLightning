@@ -7,4 +7,4 @@ forge create --rpc-url http://127.0.0.1:8545 --out contracts/out \
     contracts/src/BTCBridge.sol:ZigZagBTCBridge
 
 
-node ./contracts/init_contract.js
+node ./lnd_scripts/init_contract.js
