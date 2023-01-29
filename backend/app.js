@@ -10,23 +10,17 @@ const {
   listenToWithdrawalsClaimed,
   listenToDepositCreated,
 } = require("../lnd_scripts/ethers_utils");
-const { default: createPaymentInvoice } = require("../lnd_scripts/btc_to_eth");
-const { initGrpcConnections } = require("../lnd_scripts/utils");
+const { createPaymentInvoice } = require("../lnd_scripts/bridging_scripts");
+const {
+  initGrpcConnections,
+  subscribeToInvoices,
+} = require("../lnd_scripts/grpcConnection");
 
 dotenv.config();
 
-// const db = new Pool({
-//   connectionString: process.env.DATABASE_URL,
-//   ssl: { rejectUnauthorized: false },
-// });
-
-// Note: For testing
 const db = new Pool({
-  host: "localhost",
-  user: "database-user",
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
 async function runDbMigration() {
@@ -36,9 +30,21 @@ async function runDbMigration() {
       paymentRequest TEXT
     )
   `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS settled_invoices (
+      hash UNIQUE TEXT PRIMARY KEY,
+      preimage TEXT,
+      wbtc_amount INTEGER,
+      settle_date INTEGER
+    )
+  `);
 }
 
 // runDbMigration();
+
+// NOTE: For testing just use a hashmap
+const INVOICES = {};
 
 const { lightning, router } = initGrpcConnections();
 
@@ -65,10 +71,12 @@ app.post("/Eth2Btc", async (req, res, next) => {
   const hash = req.body.hash.toString("hex");
   const paymentRequest = req.body.paymentRequest;
   try {
-    await db.query(
-      "INSERT INTO hashes VALUES ($1, $2) ON DUPLICATE KEY UPDATE paymentRequest = VALUES(paymentRequest) ",
-      [hash, paymentRequest]
-    );
+    // await db.query(
+    //   "INSERT INTO hashes VALUES ($1, $2) ON DUPLICATE KEY UPDATE paymentRequest = VALUES(paymentRequest) ",
+    //   [hash, paymentRequest]
+    // );
+
+    INVOICES[hash] = paymentRequest;
   } catch (e) {
     return next(e.detail);
   }
@@ -76,12 +84,17 @@ app.post("/Eth2Btc", async (req, res, next) => {
 });
 
 app.get("/hash/:hash", async (req, res, next) => {
-  const hashes = await db.query("SELECT * FROM hashes WHERE hash=$1", [
-    req.params.hash,
-  ]);
-  if (hashes.rows.length > 0)
-    res.status(200).json(hashes.rows[0].paymentRequest);
-  else next("Hash not found");
+  // const hashes = await db.query("SELECT * FROM hashes WHERE hash=$1", [
+  //   req.params.hash,
+  // ]);
+
+  // if (hashes.rows.length > 0)
+  //   res.status(200).json(hashes.rows[0].paymentRequest);
+  // else next("Hash not found");
+
+  if (INVOICES[req.params.hash]) {
+    res.status(200).json(INVOICES[req.params.hash]);
+  } else next("Hash not found");
 });
 // ==============================================================================
 
@@ -96,16 +109,9 @@ app.post("/Btc2Eth", async (req, res, next) => {
     ethAddress, // The users ETH address
     wbtc_amount, // The amount of WBTC to bridge
     memo, // The memo to include in the invoice
-    expiry, // The expiry of the invoice
   } = req.body;
 
-  let txReceipt = await InitiateOnChainWithdrawal(
-    ethAddress,
-    wbtc_amount,
-    memo,
-    expiry
-  );
-  // Todo: Check if successful
+  let expiry = 86400; // 24 hours
 
   let { paymentRequest, hash } = await createPaymentInvoice(
     memo,
@@ -114,7 +120,32 @@ app.post("/Btc2Eth", async (req, res, next) => {
     lightning
   );
 
-  res.status(200).json({ success: true, paymentRequest, hash });
+  let txReceipt = await InitiateOnChainWithdrawal(
+    ethAddress,
+    wbtc_amount,
+    hash,
+    expiry
+  );
+  if (txReceipt.status != 1) {
+    return next("Transaction failed");
+  }
+
+  res.status(200).json({
+    success: true,
+    paymentRequest,
+  });
+});
+
+// The user can get the preimage if the invoice has elready been settled
+app.get("/preimage/:hash", async (req, res, next) => {
+  const settled_invoice = await db.query(
+    "SELECT * FROM settled_invoices WHERE hash=$1",
+    [req.params.hash]
+  );
+
+  if (settled_invoice.rows.length > 0)
+    res.status(200).json(settled_invoice.rows[0].preimage);
+  else next("Hash not found");
 });
 
 // ————————————————————————————————————————————————————————————————————————————————
@@ -139,5 +170,6 @@ app.use((err, req, res, next) => {
 listenToDepositCreated(lightning, router);
 listenToDepositProcessed();
 listenToWithdrawalsClaimed();
+subscribeToInvoices(lightning, db);
 
 module.exports = { app, db, runDbMigration };

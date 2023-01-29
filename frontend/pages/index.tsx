@@ -10,6 +10,8 @@ import { OPEN_CHANNEL_FEE, NETWORK_FEE, CHAIN_CONFIG } from '../helpers/constant
 import Link from 'next/link'
 let LNInvoice = require("@node-lightning/invoice");
 
+const lightningPayReq = require("bolt11");
+
 
 const ERC20_ABI = require('../helpers/ERC20.abi.json');
 const BRIDGE_ABI = require('../helpers/BTCBridge.abi.json');

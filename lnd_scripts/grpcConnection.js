@@ -3,6 +3,7 @@ const protoLoader = require("@grpc/proto-loader");
 const { randomBytes } = require("crypto");
 const fs = require("fs");
 const crypto = require("crypto");
+const path = require("path");
 
 process.env.GRPC_SSL_CIPHER_SUITES = "HIGH+ECDSA";
 
@@ -22,11 +23,13 @@ function initGrpcConnections() {
     defaults: true,
     oneofs: true,
   };
+
+  const PROTOS_PATH = path.join(path.dirname(__filename), "protos");
   const packageDefinition = protoLoader.loadSync(
     [
-      "protos/lightning.proto",
-      "protos/walletunlocker.proto",
-      "protos/router.proto",
+      path.join(PROTOS_PATH, "lightning.proto"),
+      path.join(PROTOS_PATH, "walletunlocker.proto"),
+      path.join(PROTOS_PATH, "router.proto"),
     ],
     loaderOptions
   );
@@ -99,19 +102,32 @@ async function sendPayment(router, paymentReq) {
   });
 }
 
-function subscribeToInvoices(lightning) {
+async function subscribeToInvoices(lightning, db) {
   let call = lightning.subscribeInvoices({});
   call
     .on("data", function (invoice) {
-      console.log(invoice);
+      if (invoice.state == "SETTLED") {
+        console.log("Invoice SETTLED: ", invoice);
+
+        let payment_hash = invoice.r_hash.valueOf().toString("hex");
+        let preimage = invoice.r_preimage.valueOf().toString("hex");
+        let wbtc_amount = Number.parseInt(invoice.value);
+        let settle_date = Number.parseInt(invoice.settle_date);
+
+        db.query(
+          "INSERT INTO settled_invoices VALUES ($1, $2, $3, $4) ON DUPLICATE KEY UPDATE preimage = VALUES(preimage), wbtc_amount = VALUES(wbtc_amount), settle_date = VALUES(settle_date) ",
+          [payment_hash, preimage, wbtc_amount, settle_date]
+        ).catch((err) => console.log(err));
+
+        //
+      } else if (invoice.state == "CANCELED") {
+        // Probably reclaim the withdrawal onchain if this happens or send the invoice again?
+      } else if (invoice.state == "ACCEPTED") {
+        // Whats the difference between accepted and settled?
+      }
     })
-    .on("end", function () {
-      // The server has finished sending
-    })
-    .on("status", function (status) {
-      // Process status
-      console.log("Current status" + status);
-    });
+    .on("end", function () {})
+    .on("status", function (status) {});
 }
 
 function createInvoice(lightning, amountSats, memo, expiry) {
@@ -180,8 +196,6 @@ function unlockWallet() {
     wallet_password: randomBytes(1000000),
   };
   client.unlockWallet(request, function (err, response) {
-    console.log(response);
-
     console.log("Error: " + err);
   });
 }

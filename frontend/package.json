@@ -23,6 +23,8 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-toastify": "^9.1.1",
-    "typescript": "4.9.4"
+    "typescript": "4.9.4",
+    "bolt11": "^1.4.0",
+    "axios": "^1.2.6"
   }
 }
