@@ -130,6 +130,98 @@ async function subscribeToInvoices(lightning, db) {
     .on("status", function (status) {});
 }
 
+async function connectPeer(lightning) {
+  let lightningAddress = {
+    pubkey:
+      "03ee2815e38e62777cfa29f3bdc1c850c39259d8585260562512f27be344677fe6",
+    host: "localhost:10012",
+  };
+
+  lightning.connectPeer({ addr: lightningAddress }, function (err, response) {
+    console.log(response);
+
+    console.log(err);
+  });
+}
+
+async function openChannel(lightning) {
+  let request = {
+    node_pubkey: Buffer.from(
+      "03ee2815e38e62777cfa29f3bdc1c850c39259d8585260562512f27be344677fe6",
+      "hex"
+    ),
+    local_funding_amount: 1000000,
+  };
+
+  let call = lightning.openChannel(request);
+  call.on("data", function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    if (response.update === "chan_pending") {
+      console.log("Channel pending");
+    } else if (response.update === "chan_open") {
+      console.log("Channel open");
+    }
+  });
+  call.on("status", function (status) {
+    // The current status of the stream.
+  });
+  call.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
+async function allowOpenChannel(lightning) {
+  let request = {
+    accept: true,
+    error: "",
+    upfront_shutdown: "upfront_shutdown",
+    csv_delay: 144,
+    reserve_sat: 1000,
+    in_flight_max_msat: 10000000000,
+    max_htlc_count: 100,
+    min_htlc_in: 1000,
+    min_accept_depth: 1,
+    zero_conf: true,
+  };
+
+  let channelAcceptor = lightning.channelAcceptor();
+  channelAcceptor.on("data", async function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    await channelAcceptor.write({ accept: true });
+  });
+  channelAcceptor.on("error", function (err) {
+    // The current status of the stream.
+    console.log(err);
+  });
+  channelAcceptor.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
+async function subscribeChannels(lightning) {
+  let call = lightning.subscribeChannelEvents({});
+  call.on("data", function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    if (response.type === "OPEN_CHANNEL") {
+      console.log("Channel opened");
+    } else if (response.type === "CLOSE_CHANNEL") {
+      console.log("Channel closed");
+    }
+  });
+  call.on("status", function (status) {
+    // The current status of the stream.
+  });
+  call.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
 function createInvoice(lightning, amountSats, memo, expiry) {
   return new Promise((resolve) => {
     setTimeout(() => {

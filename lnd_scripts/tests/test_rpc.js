@@ -8,49 +8,149 @@ const crypto = require("crypto");
 // we need to use that cipher suite otherwise there will be a handhsake
 // error when we communicate with the lnd rpc server.
 process.env.GRPC_SSL_CIPHER_SUITES = "HIGH+ECDSA";
+const GRPC_HOST = "localhost:10001";
+const SSL_PATH = "/home/snojj25/.lnd/tls.cert";
+const MACAROON_PATH =
+  "/home/snojj25/go/dev/alice/data/chain/bitcoin/simnet/admin.macaroon";
 
-// We need to give the proto loader some extra options, otherwise the code won't
-// fully work with lnd.
-const loaderOptions = {
-  keepCase: true,
-  longs: String,
-  enums: String,
-  defaults: true,
-  oneofs: true,
-};
-const packageDefinition = protoLoader.loadSync(
-  [
-    "protos/lightning.proto",
-    "protos/walletunlocker.proto",
-    "protos/router.proto",
-  ],
-  loaderOptions
-);
+/**
+ * This is used to communicate with the lnd node over gRPC
+ */
+function initGrpcConnections() {
+  const loaderOptions = {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true,
+  };
 
-let lnrpcDescriptor = grpc.loadPackageDefinition(packageDefinition);
+  const packageDefinition = protoLoader.loadSync(
+    [
+      "../protos/lightning.proto",
+      "../protos/walletunlocker.proto",
+      "../protos/router.proto",
+    ],
+    loaderOptions
+  );
 
-let lnrpc = lnrpcDescriptor.lnrpc;
-const routerrpc = lnrpcDescriptor.routerrpc;
+  let lnrpcDescriptor = grpc.loadPackageDefinition(packageDefinition);
 
-let credentials = getCredentials();
-let lightning = new lnrpc.Lightning("localhost:10001", credentials);
-let router = new routerrpc.Router("localhost:10001", credentials);
+  let lnrpc = lnrpcDescriptor.lnrpc;
+  const routerrpc = lnrpcDescriptor.routerrpc;
+
+  let credentials = getCredentials();
+  let lightning = new lnrpc.Lightning(GRPC_HOST, credentials);
+  let router = new routerrpc.Router(GRPC_HOST, credentials);
+
+  return {
+    lightning,
+    router,
+  };
+}
+
+let { lightning, router } = initGrpcConnections();
 
 // TODO: TEST ROUTER PAYMENT V2
 
-main();
-
-// console.log(request);
+allowOpenChannel(lightning);
 
 // * =======================================================================================
 // * =======================================================================================
 // * =======================================================================================
 
-/**
- * [bar description]
-//  * @param  {[type]} foo [description]
-//  * @return {[type]}     [description]
- */
+async function connectPeer(lightning) {
+  let lightningAddress = {
+    pubkey:
+      "03ee2815e38e62777cfa29f3bdc1c850c39259d8585260562512f27be344677fe6",
+    host: "localhost:10012",
+  };
+
+  lightning.connectPeer({ addr: lightningAddress }, function (err, response) {
+    console.log(response);
+
+    console.log(err);
+  });
+}
+
+async function openChannel(lightning) {
+  let request = {
+    node_pubkey: Buffer.from(
+      "03ee2815e38e62777cfa29f3bdc1c850c39259d8585260562512f27be344677fe6",
+      "hex"
+    ),
+    local_funding_amount: 1000000,
+  };
+
+  let call = lightning.openChannel(request);
+  call.on("data", function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    if (response.update === "chan_pending") {
+      console.log("Channel pending");
+    } else if (response.update === "chan_open") {
+      console.log("Channel open");
+    }
+  });
+  call.on("status", function (status) {
+    // The current status of the stream.
+  });
+  call.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
+async function allowOpenChannel(lightning) {
+  let request = {
+    accept: true,
+    error: "",
+    upfront_shutdown: "upfront_shutdown",
+    csv_delay: 144,
+    reserve_sat: 1000,
+    in_flight_max_msat: 10000000000,
+    max_htlc_count: 100,
+    min_htlc_in: 1000,
+    min_accept_depth: 1,
+    zero_conf: true,
+  };
+
+  let channelAcceptor = lightning.channelAcceptor();
+  channelAcceptor.on("data", async function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    let res = await channelAcceptor.write({ accept: true });
+  });
+  channelAcceptor.on("error", function (err) {
+    // The current status of the stream.
+    console.log(err);
+  });
+  channelAcceptor.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
+async function subscribeChannels(lightning) {
+  let call = lightning.subscribeChannelEvents({});
+  call.on("data", function (response) {
+    // A response was received from the server.
+    console.log(response);
+
+    if (response.type === "OPEN_CHANNEL") {
+      console.log("Channel opened");
+    } else if (response.type === "CLOSE_CHANNEL") {
+      console.log("Channel closed");
+    }
+  });
+  call.on("status", function (status) {
+    // The current status of the stream.
+  });
+  call.on("end", function () {
+    // The server has closed the stream.
+  });
+}
+
 async function decodeInvoice(lightning, payReq) {
   return new Promise((resolve) => {
     setTimeout(() => {

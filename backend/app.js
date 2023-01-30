@@ -150,6 +150,20 @@ app.get("/preimage/:hash", async (req, res, next) => {
 
 // ————————————————————————————————————————————————————————————————————————————————
 
+app.post("/channels/new", async (req, res, next) => {
+  
+
+  
+
+
+
+  res.status(200).json({
+    success: true,
+    paymentRequest,
+  });
+});
+
+
 let CHANNELS = [];
 app.post("/channels", async (req, res, next) => {
   CHANNELS = req.body;

@@ -88,7 +88,6 @@ async function listenToWithdrawalsClaimed() {
 }
 
 async function UnlockDepositOnchain(preimage, hash) {
-  // bytes32 hash, bytes memory preimage
   let txRes = await zzLNContract.unlockDepositHash(hash, preimage, {
     gasLimit: 3000000,
   });
